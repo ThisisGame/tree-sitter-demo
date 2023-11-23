@@ -138,7 +138,7 @@ int main(int argc, char* argv[]) {
     auto now = std::chrono::system_clock::now();
     auto now_c = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&now_c), "%Y-%m-%d");
+    ss << std::put_time(std::localtime(&now_c), "%Y-%m-%d_%H-%M-%S");
 
     // 找到所有的 .cpp 文件
     std::vector<std::string> cpp_files = find_cpp_files(argv[1]);

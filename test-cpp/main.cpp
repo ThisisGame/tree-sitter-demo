@@ -82,33 +82,50 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
         const char* node_type = ts_node_type(node);
         //printf("Node type: %s\n", node_type);
 
-        // 打印节点内容
-        uint32_t start_byte = ts_node_start_byte(node);
-        uint32_t end_byte = ts_node_end_byte(node);
-        //printf("Node content: %.*s\n", end_byte - start_byte, &source_code[start_byte]);
+         std::string function_code = source_code.substr(ts_node_start_byte(node), ts_node_end_byte(node) - ts_node_start_byte(node));
 
         // 如果节点是函数，添加TRACE_CPUPROFILER_EVENT_SCOPE
         if (strcmp(node_type, "function_definition") == 0) {
 
             // 获取函数定义
             TSNode function_declarator_node = ts_find_node_by_type(node, "function_declarator");
+            if(ts_node_is_null(function_declarator_node))
+            {
+                std::cout<<"\033[1;31mfunction_declarator_node null--->\033[0m\n"<<function_code<<std::endl;
+                node = ts_node_next_named_sibling(node);
+                continue;
+            }
             std::string function_declarator_node_code = source_code.substr(ts_node_start_byte(function_declarator_node), ts_node_end_byte(function_declarator_node) - ts_node_start_byte(function_declarator_node));
-
-            // 获取函数定义
-            /*TSNode function_define_node = ts_node_child_by_field_name(node, "declarator", strlen("declarator"));
-            std::string function_define = source_code.substr(ts_node_start_byte(function_define_node), ts_node_end_byte(function_define_node) - ts_node_start_byte(function_define_node));*/
 
             // 获取函数名
             TSNode function_name_node = ts_node_child_by_field_name(function_declarator_node, "declarator", strlen("declarator"));
+            if(ts_node_is_null(function_name_node))
+            {
+                std::cout<<"\033[1;31mfunction_name_node null--->\033[0m\n"<<function_code<<std::endl;
+                node = ts_node_next_named_sibling(node);
+                continue;
+            }
             std::string function_name = source_code.substr(ts_node_start_byte(function_name_node), ts_node_end_byte(function_name_node) - ts_node_start_byte(function_name_node));
 
             //获取函数体compound_statement
             TSNode compound_statement_node = ts_node_child_by_node_type(node, "compound_statement");
+        	if(ts_node_is_null(compound_statement_node))
+            {
+                std::cout<<"\033[1;31mcompound_statement_node null--->\033[0m\n"<<function_code<<std::endl;
+                node = ts_node_next_named_sibling(node);
+                continue;
+            }
             std::string compound_statement_node_code = source_code.substr(ts_node_start_byte(compound_statement_node), ts_node_end_byte(compound_statement_node) - ts_node_start_byte(compound_statement_node));
 
             //获取函数体的第一个child node
             if (ts_node_child_count(compound_statement_node) > 1) {
                 TSNode first_child_node = ts_node_child(compound_statement_node, 1);
+                if(ts_node_is_null(first_child_node))
+	            {
+                    std::cout<<"\033[1;31mfirst_child_node null--->\033[0m\n"<<function_code<<std::endl;
+	                node = ts_node_next_named_sibling(node);
+	                continue;
+	            }
                 std::string first_child_node_code = source_code.substr(ts_node_start_byte(first_child_node), ts_node_end_byte(first_child_node) - ts_node_start_byte(first_child_node));
 
                 // 获取开始位置
@@ -157,6 +174,7 @@ int main(int argc, char* argv[]) {
 
     // 遍历并处理所有的 .cpp 文件
     for (const auto& file_path : cpp_files) {
+        std::cout<<file_path<<std::endl;
         // 解析源代码
         std::ifstream file(file_path);
         if (!file) {

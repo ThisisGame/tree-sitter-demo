@@ -1,2 +1,4 @@
 /test-cpp/x64
 /test-cpp/.vs
+data_bak_*
+log-*

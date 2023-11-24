@@ -84,6 +84,26 @@ TSNode ts_find_node_by_type(TSNode node, const char* node_type) {
     return TSNode();
 }
 
+TSNode ts_find_error_node(TSNode node) {
+    const char* node_type = ts_node_type(node);
+    if (strcmp(node_type, "ERROR") == 0) {
+        return node;
+    }
+
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        TSNode error_node = ts_find_error_node(child);
+        if (ts_node_is_null(error_node)==false && strcmp(ts_node_type(error_node), "ERROR") == 0) {
+            return error_node;
+        }
+    }
+
+    // Return an empty node if no error node was found
+    return TSNode();
+}
+
+
 /**
  * \brief 遍历并打印节点及其所有子节点
  * \param node 要遍历的节点
@@ -106,7 +126,12 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
             // 判断Node是否包含Error
             if(ts_node_has_error(node))
 			{
-				NODE_ERROR_CONTINUE("function_definition",node_code)
+                TSNode error_node = ts_find_error_node(node);
+                if(ts_node_is_null(error_node)==false)
+				{
+					std::string error_node_code = source_code.substr(ts_node_start_byte(error_node), ts_node_end_byte(error_node) - ts_node_start_byte(error_node));
+                    NODE_ERROR_CONTINUE("Error",error_node_code)
+				}
 			}
 
             // 获取函数定义

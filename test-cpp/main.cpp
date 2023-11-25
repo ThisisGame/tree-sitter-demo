@@ -10,19 +10,43 @@
 #include <iomanip>
 #include <sstream>
 
-#define InsertTraceToFunction 0
+#define InsertTraceToFunction 1
 
 #define ParseFunction 1
 
+// 输出日志并且写入到log文件
 #define PRINT_MSG(...) \
     std::cout << __VA_ARGS__ << std::endl; \
 	log_file << __VA_ARGS__ << std::endl;
 
+// 输出绿色颜色的日志并且写入到log文件
+#define PRINT_MSG_GREEN(...) \
+    std::cout << "\033[1;32m" << __VA_ARGS__ << "\033[0m" << std::endl; \
+    log_file << __VA_ARGS__ << std::endl;
+
+// 输出红色颜色的日志并且写入到log文件
+#define PRINT_MSG_RED(...) \
+    std::cout << "\033[1;31m" << __VA_ARGS__ << "\033[0m" << std::endl; \
+    log_file << __VA_ARGS__ << std::endl;
+
+// 切换到下一个node
+#define NODE_CONTINUE() \
+                                                            node = ts_node_next_named_sibling(node); \
+                                                            continue;
+
+// 输出红色错误日志，并且切换到下一个node
 #define NODE_ERROR_CONTINUE(NodeName,NodeCode) \
 															log_file << NodeName << " has error--->\n" << NodeCode << std::endl; \
 															std::cout<<"\033[1;31m"<<NodeName<<" has error--->\033[0m\n"<<NodeCode<<std::endl; \
 															node = ts_node_next_named_sibling(node); \
 															continue;
+
+// 输出绿色日志，并且切换到下一个node
+#define NODE_PRINT_CONTINUE(NodeName,NodeCode) \
+                                                            log_file << NodeName << " has error--->\n" << NodeCode << std::endl; \
+                                                            std::cout<<"\033[1;32m"<<NodeName<<" has error--->\033[0m\n"<<NodeCode<<std::endl; \
+                                                            node = ts_node_next_named_sibling(node); \
+                                                            continue;
 
 extern "C" TSLanguage *tree_sitter_cpp();
 
@@ -38,10 +62,20 @@ std::vector<std::string> find_cpp_files(const std::string& directory) {
 }
 
 // 备份文件
-void backup_files(const std::vector<std::string>& files, const std::string& backup_directory) {
+void backup_files(const std::vector<std::string>& files, const std::string& source_directory, const std::string& backup_directory) {
     std::filesystem::create_directories(backup_directory);
     for (const auto& file : files) {
-        std::filesystem::copy(file, backup_directory + "/" + std::filesystem::path(file).filename().string(), std::filesystem::copy_options::overwrite_existing);
+        // 获取文件相对于源目录的路径
+        std::filesystem::path relative_path = std::filesystem::relative(file, source_directory);
+
+        // 在备份目录中创建相同的路径
+        std::filesystem::path backup_path = backup_directory / relative_path;
+
+        // 创建备份文件的目录
+        std::filesystem::create_directories(backup_path.parent_path());
+
+        // 复制文件
+        std::filesystem::copy(file, backup_path, std::filesystem::copy_options::overwrite_existing);
     }
 }
 
@@ -124,15 +158,18 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
         if (strcmp(node_type, "function_definition") == 0) {
 
             // 判断Node是否包含Error
-            if(ts_node_has_error(node))
+            /*if(ts_node_has_error(node))
 			{
                 TSNode error_node = ts_find_error_node(node);
                 if(ts_node_is_null(error_node)==false)
 				{
 					std::string error_node_code = source_code.substr(ts_node_start_byte(error_node), ts_node_end_byte(error_node) - ts_node_start_byte(error_node));
-                    NODE_ERROR_CONTINUE("Error",error_node_code)
+
+                    PRINT_MSG_RED("Error node: "<<error_node_code)
+
+                    NODE_ERROR_CONTINUE("function_definition",node_code)
 				}
-			}
+			}*/
 
             // 获取函数定义
             TSNode function_declarator_node = ts_find_node_by_type(node, "function_declarator");
@@ -176,13 +213,19 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
 					NODE_ERROR_CONTINUE("function_name multiline",function_name)
 				}
 
-#if InsertTraceToFunction
+                std::string trace_line = "TRACE_CPUPROFILER_EVENT_SCOPE(" + function_name + ");";
 
+                // 判断是否已经插入过TRACE_CPUPROFILER_EVENT_SCOPE
+                if (first_child_node_code.find("TRACE_CPUPROFILER_EVENT_SCOPE") != std::string::npos) {
+                    NODE_CONTINUE()
+                }
+
+                PRINT_MSG_GREEN("function_name: "<<function_name)
+
+#if InsertTraceToFunction
                 // 获取函数体与第一个Node之间的空白字符
                 std::string blank_chars = source_code.substr(ts_node_start_byte(compound_statement_node)+1, ts_node_start_byte(first_child_node) - ts_node_start_byte(compound_statement_node)-1);
 
-
-	            std::string trace_line = "TRACE_CPUPROFILER_EVENT_SCOPE(" + function_name + ");";
                 trace_line += blank_chars;
 	            insertions.push_back({first_child_start, trace_line});
 #endif
@@ -228,7 +271,7 @@ int main(int argc, char* argv[]) {
     std::string dir_name = std::filesystem::path(argv[1]).filename().string();
 
     // 备份 .cpp 文件
-    backup_files(cpp_files, std::filesystem::path(argv[1]).parent_path().string() + "/" + dir_name + "_bak_" + ss.str());
+    backup_files(cpp_files, argv[1],"./" + dir_name + "_bak_" + ss.str());
 #endif
 
     // 创建一个解析器

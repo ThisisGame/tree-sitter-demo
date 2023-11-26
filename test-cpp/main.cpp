@@ -12,6 +12,8 @@
 
 #define InsertTraceToFunction 1
 
+#define WriteInsertTrace 1
+
 #define ParseFunction 1
 
 // 输出日志并且写入到log文件
@@ -40,6 +42,16 @@
 															std::cout<<"\033[1;31m"<<NodeName<<" has error--->\033[0m\n"<<NodeCode<<std::endl; \
 															node = ts_node_next_named_sibling(node); \
 															continue;
+
+// 输出红色错误日志，并且如果节点有子节点，递归遍历
+#define NODE_ERROR_CONTINUE_TRAVERSE(NodeName,NodeCode) \
+                                                            log_file << NodeName << " has error--->\n" << NodeCode << std::endl; \
+                                                            std::cout<<"\033[1;31m"<<NodeName<<" has error--->\033[0m\n"<<NodeCode<<std::endl; \
+                                                            if (ts_node_child_count(node) > 0) { \
+                                                                traverse_and_print(ts_node_named_child(node, 0), source_code, insertions,log_file); \
+                                                            } \
+                                                            node = ts_node_next_named_sibling(node); \
+                                                            continue;
 
 // 输出绿色日志，并且切换到下一个node
 #define NODE_PRINT_CONTINUE(NodeName,NodeCode) \
@@ -118,6 +130,39 @@ TSNode ts_find_node_by_type(TSNode node, const char* node_type) {
     return TSNode();
 }
 
+TSNode ts_find_node_in_first_child_level_by_type(TSNode node, const char* node_type) {
+    // 遍历所有子节点
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child_node = ts_node_named_child(node, i);
+        if (ts_node_is_null(child_node) == 1) {
+            continue;
+        }
+
+        // 获取当前节点的类型
+	    const char* child_node_type = ts_node_type(child_node);
+
+	    // 检查当前节点的类型是否是指定的类型
+	    if (strcmp(child_node_type, node_type) == 0) {
+	        return child_node;
+	    }
+    }
+
+    // 如果没有找到指定类型的节点，返回一个空节点
+    return TSNode();
+}
+
+bool ts_check_node_source_code(const std::string& source_code,TSNode node, const char* in_node_code) {
+    if(ts_node_is_null(node)==false)
+    {
+        std::string node_code = source_code.substr(ts_node_start_byte(node), ts_node_end_byte(node) - ts_node_start_byte(node));
+        if (in_node_code==node_code) {
+	        return true;
+	    }
+    }
+    return false;
+}
+
 TSNode ts_find_error_node(TSNode node) {
     const char* node_type = ts_node_type(node);
     if (strcmp(node_type, "ERROR") == 0) {
@@ -153,31 +198,47 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
     	std::string node_code = source_code.substr(ts_node_start_byte(node), ts_node_end_byte(node) - ts_node_start_byte(node));
         //PRINT_MSG("Node code: "<<node_code)
 
+        // function_definition节点下第一层子节点存在function_declarator
+        // 在function_declarator第一层子节点查找函数定义(静态函数identifier/field_identifier/qualified_identifier)和参数(parameter_list)
+
 #if ParseFunction
         // 如果节点是函数，添加TRACE_CPUPROFILER_EVENT_SCOPE
-        if (strcmp(node_type, "function_definition") == 0) {
+        if (strcmp(node_type, "function_definition") == 0) 
+        {
+            // function_definition第一层子级存在type_qualifier类型，且内容等于constexpr，这种不能在里面插入Trace宏
+            TSNode constexpr_node=ts_find_node_in_first_child_level_by_type(node,"type_qualifier");
+            if(ts_check_node_source_code(source_code,constexpr_node,"constexpr"))
+            {
+				NODE_ERROR_CONTINUE("constexpr can't trace",node_code)
+            }
 
-            // 判断Node是否包含Error
-            /*if(ts_node_has_error(node))
-			{
-                TSNode error_node = ts_find_error_node(node);
-                if(ts_node_is_null(error_node)==false)
-				{
-					std::string error_node_code = source_code.substr(ts_node_start_byte(error_node), ts_node_end_byte(error_node) - ts_node_start_byte(error_node));
-
-                    PRINT_MSG_RED("Error node: "<<error_node_code)
-
-                    NODE_ERROR_CONTINUE("function_definition",node_code)
-				}
-			}*/
-
-            // 获取函数定义
-            TSNode function_declarator_node = ts_find_node_by_type(node, "function_declarator");
+            // 在第一层查找function_declarator
+            TSNode function_declarator_node = ts_find_node_in_first_child_level_by_type(node, "function_declarator");
             if(ts_node_is_null(function_declarator_node))
             {
-                NODE_ERROR_CONTINUE("function_declarator",node_code)
+                NODE_ERROR_CONTINUE_TRAVERSE("function_declarator",node_code)
             }
             std::string function_declarator_node_code = source_code.substr(ts_node_start_byte(function_declarator_node), ts_node_end_byte(function_declarator_node) - ts_node_start_byte(function_declarator_node));
+
+            // 在function_declarator第一层子节点查找函数定义(静态函数identifier/field_identifier/qualified_identifier)和参数(parameter_list)
+            TSNode function_declarator_identifier_node = ts_find_node_in_first_child_level_by_type(function_declarator_node, "identifier");
+            TSNode function_declarator_field_identifier_node = ts_find_node_in_first_child_level_by_type(function_declarator_node, "field_identifier");
+            TSNode function_declarator_qualified_identifier_node = ts_find_node_in_first_child_level_by_type(function_declarator_node, "qualified_identifier");
+            TSNode function_declarator_parameter_list_node = ts_find_node_in_first_child_level_by_type(function_declarator_node, "parameter_list");
+
+            // 验证不通过，没有函数定义
+            if(ts_node_is_null(function_declarator_identifier_node) 
+                && ts_node_is_null(function_declarator_field_identifier_node)
+                && ts_node_is_null(function_declarator_qualified_identifier_node))
+            {
+	            NODE_ERROR_CONTINUE_TRAVERSE("identifier",node_code)
+            }
+
+            // 验证不通过，没有参数列表
+            if(ts_node_is_null(function_declarator_parameter_list_node))
+            {
+                NODE_ERROR_CONTINUE_TRAVERSE("parameter_list",node_code)
+            }
 
             //获取函数体compound_statement
             TSNode compound_statement_node = ts_node_child_by_node_type(node, "compound_statement");
@@ -301,7 +362,7 @@ int main(int argc, char* argv[]) {
         std::vector<std::pair<size_t, std::string>> insertions;
         traverse_and_print(root_node, source_code, insertions,log_file);
 
-#if InsertTraceToFunction
+#if WriteInsertTrace
         // 按照位置从大到小的顺序插入字符串，这样不会影响到其他插入位置的正确性
         std::sort(insertions.begin(), insertions.end(), [](const std::pair<size_t, std::string>& a, const std::pair<size_t, std::string>& b) {
             return a.first > b.first;

@@ -1,0 +1,2 @@
+ReflectionMetadata.cpp FReflectionMetaData::GetWidgetOrParentMetaData
+ReflectionMetadata.cpp FReflectionMetaData::GetWidgetDebugInfo

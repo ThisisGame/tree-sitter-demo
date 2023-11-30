@@ -9,6 +9,8 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 
 #define InsertTraceToFunction 1
 
@@ -48,7 +50,7 @@
                                                             log_file << NodeName << " has error--->\n" << NodeCode << std::endl; \
                                                             std::cout<<"\033[1;31m"<<NodeName<<" has error--->\033[0m\n"<<NodeCode<<std::endl; \
                                                             if (ts_node_child_count(node) > 0) { \
-                                                                traverse_and_print(ts_node_named_child(node, 0), source_code, insertions,log_file); \
+                                                                traverse_and_print(ts_node_named_child(node, 0), source_code, insertions,log_file,ignore_function_list); \
                                                             } \
                                                             node = ts_node_next_named_sibling(node); \
                                                             continue;
@@ -88,7 +90,24 @@ void backup_files(const std::vector<std::string>& files, const std::string& sour
 
         // 复制文件
         std::filesystem::copy(file, backup_path, std::filesystem::copy_options::overwrite_existing);
+
+        // 设置备份文件的最后修改时间为当前时间
+        std::filesystem::last_write_time(backup_path, std::filesystem::file_time_type::clock::now());
     }
+}
+
+// 读取忽略列表
+std::unordered_map<std::string, std::unordered_set<std::string>> read_ignore_list(const std::string& filename) {
+    std::unordered_map<std::string, std::unordered_set<std::string>> ignore_list;
+    std::ifstream file(filename);
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string file_name, function_name;
+        if (!(iss >> file_name >> function_name)) { break; } // error
+        ignore_list[file_name].insert(function_name);
+    }
+    return ignore_list;
 }
 
 TSNode ts_node_child_by_node_type(TSNode node,const char* in_node_type)
@@ -189,7 +208,7 @@ TSNode ts_find_error_node(TSNode node) {
  * \param source_code 源代码字符串
  * \param insertions 保存需要插入的字符串和位置的向量
  */
-void traverse_and_print(TSNode node, const std::string& source_code, std::vector<std::pair<size_t, std::string>>& insertions,std::ofstream& log_file) {
+void traverse_and_print(TSNode node, const std::string& source_code, std::vector<std::pair<size_t, std::string>>& insertions,std::ofstream& log_file,std::unordered_set<std::string>& ignore_function_list) {
     while (ts_node_is_null(node) == false) {
         // 打印节点的类型
         const char* node_type = ts_node_type(node);
@@ -274,6 +293,12 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
 					NODE_ERROR_CONTINUE("function_name multiline",function_name)
 				}
 
+                // 检查函数是否在忽略列表中
+		        if (ignore_function_list.count(function_name) > 0) {
+		            // 忽略这个函数
+		            NODE_CONTINUE()
+		        }
+
                 std::string trace_line = "TRACE_CPUPROFILER_EVENT_SCOPE(" + function_name + ");";
 
                 // 判断是否已经插入过TRACE_CPUPROFILER_EVENT_SCOPE
@@ -296,7 +321,7 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
 
         // 如果节点有子节点，递归遍历
         if (ts_node_child_count(node) > 0) {
-            traverse_and_print(ts_node_named_child(node, 0), source_code, insertions,log_file);
+            traverse_and_print(ts_node_named_child(node, 0), source_code, insertions,log_file,ignore_function_list);
         }
 
         // 获取下一个节点
@@ -317,6 +342,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Usage: " << argv[0] << " <directory>\n";
         return 1;
     }
+
+    // 读取忽略列表
+    std::unordered_map<std::string, std::unordered_set<std::string>> ignore_list = read_ignore_list("./ignore_list.txt");
 
     // 获取当前日期
     auto now = std::chrono::system_clock::now();
@@ -358,9 +386,18 @@ int main(int argc, char* argv[]) {
         // 获取抽象语法树的根节点
         TSNode root_node = ts_tree_root_node(tree);
 
+        // 是否包含忽略
+        std::unordered_set<std::string> ignore_function_list;
+        std::string cpp_filename = std::filesystem::path(file_path).filename().string();
+        if(ignore_list.count(cpp_filename)>0)
+        {
+        	ignore_function_list=ignore_list[cpp_filename];
+        }
+
+
         // 遍历抽象语法树并记录需要插入的字符串和位置
         std::vector<std::pair<size_t, std::string>> insertions;
-        traverse_and_print(root_node, source_code, insertions,log_file);
+        traverse_and_print(root_node, source_code, insertions,log_file,ignore_function_list);
 
 #if WriteInsertTrace
         // 按照位置从大到小的顺序插入字符串，这样不会影响到其他插入位置的正确性

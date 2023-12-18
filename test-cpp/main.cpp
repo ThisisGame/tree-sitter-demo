@@ -299,7 +299,7 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
 		            NODE_CONTINUE()
 		        }
 
-                std::string trace_line = "TRACE_CPUPROFILER_EVENT_SCOPE(" + function_name + ");";
+                std::string trace_line = "TRACE_CPUPROFILER_EVENT_SCOPE_WHEN_TRACING(" + function_name + ");";
 
                 // 判断是否已经插入过TRACE_CPUPROFILER_EVENT_SCOPE
                 if (first_child_node_code.find("TRACE_CPUPROFILER_EVENT_SCOPE") != std::string::npos) {

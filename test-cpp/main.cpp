@@ -65,12 +65,17 @@
 extern "C" TSLanguage *tree_sitter_cpp();
 
 // 遍历目录并找到所有的 .cpp 文件
-std::vector<std::string> find_cpp_files(const std::string& directory) {
+std::vector<std::string> find_cpp_files(const std::string& path) {
     std::vector<std::string> cpp_files;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
-        if (entry.path().extension() == ".cpp") {
-            cpp_files.push_back(entry.path().string());
+    std::filesystem::path fs_path(path);
+    if (std::filesystem::is_directory(fs_path)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(fs_path)) {
+            if (entry.path().extension() == ".cpp") {
+                cpp_files.push_back(entry.path().string());
+            }
         }
+    } else if (fs_path.extension() == ".cpp") {
+        cpp_files.push_back(fs_path.string());
     }
     return cpp_files;
 }
@@ -301,6 +306,11 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
 
                 std::string trace_line = "TRACE_CPUPROFILER_EVENT_SCOPE_WHEN_TRACING(" + function_name + ");";
 
+                // 判断是否已经插入过TRACE_CPUPROFILER_EVENT_SCOPE_WHEN_TRACING
+                if (first_child_node_code.find("TRACE_CPUPROFILER_EVENT_SCOPE_WHEN_TRACING") != std::string::npos) {
+                    NODE_CONTINUE()
+                }
+
                 // 判断是否已经插入过TRACE_CPUPROFILER_EVENT_SCOPE
                 if (first_child_node_code.find("TRACE_CPUPROFILER_EVENT_SCOPE") != std::string::npos) {
                     NODE_CONTINUE()
@@ -332,11 +342,14 @@ void traverse_and_print(TSNode node, const std::string& source_code, std::vector
 
 
 int main(int argc, char* argv[]) {
+    // 获取当前可执行文件的路径
+    std::string exe_directory = std::filesystem::path(argv[0]).parent_path().string();
+
     std::time_t t = std::time(nullptr);
-	char buf[100];
-	std::strftime(buf, sizeof(buf), "%Y-%m-%d-%H-%M-%S", std::localtime(&t));
-	std::string filename = std::string("log-") + buf;
-	std::ofstream log_file(filename, std::ios_base::app);
+    char buf[100];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d-%H-%M-%S", std::localtime(&t));
+    std::string filename = exe_directory + "/log-" + buf;
+    std::ofstream log_file(filename, std::ios_base::app);
 
     if (argc != 2) {
         std::cout << "Usage: " << argv[0] << " <directory>\n";
@@ -360,7 +373,7 @@ int main(int argc, char* argv[]) {
     std::string dir_name = std::filesystem::path(argv[1]).filename().string();
 
     // 备份 .cpp 文件
-    backup_files(cpp_files, argv[1],"./" + dir_name + "_bak_" + ss.str());
+    backup_files(cpp_files, argv[1],exe_directory + "/" + dir_name + "_bak_" + ss.str());
 #endif
 
     // 创建一个解析器
@@ -422,6 +435,10 @@ int main(int argc, char* argv[]) {
 
     // 删除解析器
     ts_parser_delete(parser);
+
+    std::cout << "Done!\n";
+
+    system("pause");
 
     return 0;
 }
